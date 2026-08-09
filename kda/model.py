@@ -197,11 +197,15 @@ class LanguageModel(nn.Module):
         the only number that means anything on these tasks.
         """
         logits = self(tokens)
-        if mask is None:
-            mask = torch.ones_like(targets, dtype=torch.bool)
-        sel = mask.reshape(-1)
-        lg = logits.reshape(-1, logits.shape[-1])[sel]
-        tg = targets.reshape(-1)[sel]
+        lg = logits.reshape(-1, logits.shape[-1])
+        tg = targets.reshape(-1)
+        # Only gather when there is something to gather. Indexing with an all-True
+        # mask is not free -- it copies the whole logits tensor, which at language-model
+        # scale (batch x 2048 x 50304) is hundreds of megabytes per microbatch and was
+        # enough on its own to run a 34M-parameter model out of memory on a 24GB card.
+        if mask is not None:
+            sel = mask.reshape(-1)
+            lg, tg = lg[sel], tg[sel]
         loss = F.cross_entropy(lg, tg)
         acc = (lg.argmax(-1) == tg).float().mean()
         return loss, acc
