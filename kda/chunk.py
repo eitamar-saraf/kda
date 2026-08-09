@@ -244,7 +244,10 @@ def chunk_linear_attn(
     w, u = wu.split([dk, dv], dim=-1)
 
     # ---- sequential over chunks, parallel within ----------------------------
-    S = q.new_zeros(b, h, dk, dv) if initial_state is None else initial_state.clone()
+    # Match the compute dtype: an fp32 state carried into a bf16 layer promotes S on
+    # the first chunk and the next chunk's q_t @ S then fails on mixed dtypes.
+    S = (q.new_zeros(b, h, dk, dv) if initial_state is None
+         else initial_state.to(q.dtype).clone())
     out = []
     for i in range(n):
         c = u[:, :, i] - w[:, :, i] @ S               # C = U - W S^0

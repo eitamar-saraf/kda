@@ -277,7 +277,8 @@ class LinearAttentionLayer(nn.Module):
         o = self.o_proj(o)
 
         if return_gates:
-            return o, {"log_alpha": log_alpha, "beta": beta}
+            gates = {"log_alpha": log_alpha, "beta": beta}
+            return (o, state, gates) if return_state else (o, gates)
         return (o, state) if return_state else o
 
 
