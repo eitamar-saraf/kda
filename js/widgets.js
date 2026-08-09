@@ -595,7 +595,7 @@ export function mountChunkwise(root) {
     "The recurrence is sequential, which a GPU hates. Splitting into chunks of C makes everything inside a chunk a few dense matmuls and leaves only chunk-to-chunk state passing sequential.");
 
   const controls = el("div", "grid sm:grid-cols-2 gap-4 mb-4", box);
-  const chart = svg("svg", { viewBox: "0 0 640 250", class: "w-full", role: "img" }, box);
+  const chart = svg("svg", { viewBox: "0 0 640 285", class: "w-full", role: "img" }, box);
   const caption = el("p", "text-sm text-gray-600 mt-2", box);
 
   let logT = 12, C_ = 64;
@@ -635,7 +635,7 @@ export function mountChunkwise(root) {
       .textContent = `${fmtNum(Math.ceil(T / cs))} chunks of ${cs} tokens`;
 
     // cost curve
-    const bx = 20, by = 190, bw = 600, bh = 0;
+    const bx = 20, by = 218, bw = 600;
     const f = flops(T, d, cs);
     const total = f.kda;
     const parts = [
