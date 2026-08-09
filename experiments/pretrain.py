@@ -46,8 +46,11 @@ class PretrainConfig:
     d_model: int = 512
     n_layers: int = 8
     n_heads: int = 8
-    batch_size: int = 8
-    grad_accum: int = 8               # effective batch 64 sequences = 131k tokens
+    # The logits dominate memory here, not the model: batch x 2048 x 50304 is ~1.7GB
+    # in bf16 at batch 8, and cross-entropy upcasts it. Microbatch 4 with twice the
+    # accumulation keeps the effective batch identical at 64 sequences (131k tokens).
+    batch_size: int = 4
+    grad_accum: int = 16
     steps: int = 8000
     lr: float = 3e-4
     min_lr_frac: float = 0.1

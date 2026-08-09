@@ -70,14 +70,50 @@ def dplr_equivalent(q, k, v, g, beta):
     carries no coefficient of its own.
     """
     a = -(beta[..., None] * k)
-    b = g.float().exp().to(k.dtype) * k
+    # Exponentiate in at least float32 (bf16 would lose the gate), but never *down*cast:
+    # a bare .float() silently truncates a float64 input, which is exactly the kind of
+    # 1e-8 discrepancy that makes an equivalence test look like an algebra error.
+    wide = torch.promote_types(g.dtype, torch.float32)
+    b = g.to(wide).exp().to(k.dtype) * k
     return q, k, v * beta[..., None], a, b, g
+
+
+def verify_dplr_matches_kda(b=1, h=2, t=256, dk=64, dv=64, tol=5e-2) -> float:
+    """Confirm the DPLR kernel computes the same function before we time against it.
+
+    A speedup is only a speedup if both kernels compute the same thing. The algebra is
+    pinned on CPU in ``tests/test_dplr_equivalence.py``, but fla's convention for where
+    the rank-1 term applies is a documented formula rather than a guarantee, so this
+    checks the actual kernels and refuses to report a ratio if they disagree.
+
+    Returns the relative error; raises if it exceeds ``tol``.
+    """
+    import fla.ops as ops
+
+    torch.manual_seed(0)
+    q, k, v, g, beta = make_kda_inputs(b, h, t, dk, dv, dtype=torch.float32)
+    scale = dk ** -0.5
+    o_kda, _ = ops.chunk_kda(q=q, k=k, v=v, g=g, beta=beta, scale=scale)
+    qd, kd, vd, ad, bd, gd = dplr_equivalent(q, k, v, g, beta)
+    o_dplr, _ = ops.chunk_dplr_delta_rule(q=qd, k=kd, v=vd, a=ad, b=bd, gk=gd, scale=scale)
+
+    rel = ((o_dplr.float() - o_kda.float()).norm() / o_kda.float().norm()).item()
+    if not (rel < tol):
+        raise RuntimeError(
+            f"the DPLR kernel disagrees with chunk_kda (relative error {rel:.3e}). "
+            "Timing them against each other would not measure a speedup -- check the "
+            "a/b/gk mapping in dplr_equivalent against fla's current convention."
+        )
+    return rel
 
 
 def bench_kernels(lengths, b=1, h=16, dk=128, dv=128, backward=False):
     """Figure 2: our chunk kernel vs general DPLR vs flash attention."""
     import fla.ops as ops
     from kda.chunk import chunk_linear_attn
+
+    rel = verify_dplr_matches_kda()
+    print(f"  [check] DPLR kernel agrees with chunk_kda to {rel:.2e} relative error")
 
     rows = []
     for t in lengths:

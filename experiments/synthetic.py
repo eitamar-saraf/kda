@@ -173,7 +173,7 @@ def run(cfg: RunConfig, log=print) -> dict:
 
 
 def sweep(tasks, out_dir: Path, seq_lens=(256, 512, 1024, 2048),
-          lr=1e-3, steps=6000, seeds=(0, 1, 2), device="cuda"):
+          lr=1e-3, steps=6000, seeds=(0, 1, 2), device="cuda", variants=None):
     """The Figure 4 grid: every variant, every length, several seeds.
 
     Seeds are not optional here. These tasks are solved through a sharp phase
@@ -202,16 +202,19 @@ def sweep(tasks, out_dir: Path, seq_lens=(256, 512, 1024, 2048),
         p.write_text(json.dumps(res, indent=2))
         return res
 
+    use = variants or VARIANTS
     for task in tasks:
         for seq_len in seq_lens:
-            for variant in VARIANTS:
+            for variant in use:
                 accs = []
                 for seed in seeds:
                     res = do(task, variant, seq_len, seed)
                     accs.append(res["best_acc"])
                 mean = sum(accs) / len(accs)
+                solved = sum(a >= 0.9 for a in accs)
                 print(f"  [{task}] T={seq_len:5d} {variant:17s} "
-                      f"mean={mean:.3f}  seeds={[f'{a:.2f}' for a in accs]}", flush=True)
+                      f"solved={solved}/{len(accs)}  mean={mean:.3f}  "
+                      f"seeds={[f'{a:.2f}' for a in accs]}", flush=True)
     print("sweep complete")
 
 
@@ -220,6 +223,8 @@ def main():
     p.add_argument("--sweep", action="store_true")
     p.add_argument("--tasks", default="mqar,palindrome,stack")
     p.add_argument("--seeds", default="0,1,2")
+    p.add_argument("--variants", default=None, help="comma-separated subset of VARIANTS")
+    p.add_argument("--seq-lens", default=None, help="comma-separated sequence lengths")
     p.add_argument("--task", default="mqar", choices=["mqar", "palindrome", "stack"])
     p.add_argument("--variant", default="kda", choices=VARIANTS)
     p.add_argument("--seq-len", type=int, default=1024)
@@ -237,6 +242,8 @@ def main():
             Path(a.out or "runs/synthetic"),
             steps=a.steps, device=a.device,
             seeds=tuple(int(x) for x in a.seeds.split(",")),
+            variants=[v.strip() for v in a.variants.split(",")] if a.variants else None,
+            seq_lens=tuple(int(x) for x in a.seq_lens.split(",")) if a.seq_lens else (256, 512, 1024, 2048),
         )
         return
 
