@@ -60,6 +60,9 @@ six transcriptions of Table 7   ==   kda/recurrent.py   ==   kda/chunk.py
   forward and backward (GPU).
 - `js/kda-math.test.js` — the browser code in the article's figures against fixtures
   exported from the Python reference.
+- `tests/test_dplr_equivalence.py` — KDA as a constrained diagonal-plus-low-rank
+  recurrence, against an independent DPLR transcription. This is what makes the
+  KDA-vs-DPLR speedup in the benchmark a comparison rather than a coincidence.
 
 ## Layout
 
@@ -74,16 +77,21 @@ kda/
   model.py       hybrid LM with a configurable KDA:attention ratio
   tasks/         MQAR, palindrome, interleaved LIFO stacks
 experiments/     synthetic sweep, kernel benchmarks, LM pretraining, data prep
-scripts/         figure generation, widget fixture export
+scripts/         figure generation, widget fixtures, notebook builder
 js/              the browser implementation used by the article's interactive figures
+notebooks/       annotated_kda.ipynb -- the whole derivation, runnable, CPU only
 ```
+
+The notebook is *generated* by `python -m scripts.build_notebook --execute`, which runs
+every cell before writing it. That way its prose and the package cannot drift apart:
+every claim in it is a cell that executed.
 
 ## Running it
 
 ```bash
 uv venv && uv pip install torch --index-url https://download.pytorch.org/whl/cpu
 uv pip install -e ".[dev,figures]"
-pytest                      # 61 tests, CPU only, seconds
+pytest                      # 64 tests, CPU only, seconds
 node --test js/             # the browser maths against the Python fixtures
 ```
 
@@ -133,7 +141,7 @@ now regression tests.
 
 - **Never form `1/Γ`.** The chunkwise algebra divides by the cumulative decay, which over
   64 tokens at α ≈ 0.8 reaches 10⁶ — past fp16's 65504 ceiling. Computed naively in fp16
-  that matrix came out with **832 non-finite entries of 4096**. Every occurrence is a
+  that matrix came out with **834 non-finite entries of 4096**. Every occurrence is a
   *pairwise* ratio `exp(gc_r − gc_i)` with `i ≤ r`, and since `gc` only decreases, that
   exponent is never positive. Same numbers, no overflow, ordinary fp16 rounding error.
 - **`kda/chunk.py` is written to be read, not raced.** It is ~12× slower than the fused
