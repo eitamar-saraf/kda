@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Large artifacts live off-repo (see README: /mnt/ssd2/kda, /mnt/data/kda on trex)
+runs/
+checkpoints/
+data/
+*.bin
+*.pt
+*.ckpt
+node_modules/
