@@ -103,7 +103,12 @@ def decay_gram(x: Tensor, y: Tensor, gc: Tensor, *, stable: bool = True) -> Tens
     if stable:
         rows = []
         for r in range(c):
-            d = (gc[..., r : r + 1, :] - gc).exp() * (idx <= r)[:, None]
+            # For i <= r this exponent is <= 0 because gc is non-increasing. For
+            # i > r it is positive and can overflow to inf -- and inf * 0 is NaN, not
+            # 0, so the mask alone will not save us. Clamp first, then mask: the
+            # clamp is inert on every entry we actually keep.
+            diff = (gc[..., r : r + 1, :] - gc).clamp_max(0.0)
+            d = diff.exp() * (idx <= r)[:, None]
             rows.append((x[..., r : r + 1, :] * y * d.to(x.dtype)).sum(-1))
         return torch.stack(rows, dim=-2)
 
