@@ -144,9 +144,10 @@ now regression tests.
   that matrix came out with **834 non-finite entries of 4096**. Every occurrence is a
   *pairwise* ratio `exp(gc_r − gc_i)` with `i ≤ r`, and since `gc` only decreases, that
   exponent is never positive. Same numbers, no overflow, ordinary fp16 rounding error.
-- **`kda/chunk.py` is written to be read, not raced.** It is ~12× slower than the fused
-  Triton kernels, which is why `kda/fast.py` exists and why the two are pinned to each
-  other by tests.
+- **`kda/chunk.py` is written to be read, not raced.** At the kernel level it is ~82×
+  slower than the fused Triton kernels (37 ms vs 0.46 ms at T=2048 on a 3090); inside a
+  small training step, where projections dominate, the gap narrows to ~12×. That is why
+  `kda/fast.py` exists, and why the two are pinned to each other by tests.
 
 ## Publishing the article
 
