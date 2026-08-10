@@ -148,6 +148,20 @@ now regression tests.
   Triton kernels, which is why `kda/fast.py` exists and why the two are pinned to each
   other by tests.
 
+## Publishing the article
+
+The writeup lives in a separate repository (the site), which serves its own copy of
+`js/kda-math.js` and `js/widgets.js`. Those copies are what make the "the figures run
+tested code" claim true, so they are checked rather than trusted:
+
+```bash
+python -m scripts.sync_site --check   # exits 1 if the deployed copy has drifted
+python -m scripts.sync_site           # copy across, then rebuild the site
+```
+
+Run the check before publishing. A stale copy would leave the article's figures quietly
+computing something no test has seen — the exact failure the fixture tests exist to catch.
+
 ## Licence
 
 MIT.
