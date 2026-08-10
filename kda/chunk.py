@@ -209,7 +209,10 @@ def chunk_linear_attn(
     # gc[..., r, :] = sum_{j<=r} log a_j   (inclusive), so exp(gc) = g_r.
     gc = la.cumsum(dim=-2)
     g = gc.exp()                       # G, all entries in (0, 1]
-    g_last = g[..., -1:, :]            # g_C
+    # g_C, cast to the compute dtype. The gate maths is deliberately kept wide, but this
+    # value multiplies the carried state: leaving it fp32 promotes S on the first chunk
+    # and the next chunk's q_t @ S then dies with "expected BFloat16 but found Float".
+    g_last = g[..., -1:, :].to(q.dtype)
 
     q_t = (q * g.to(q.dtype))          # Q~ = G * Q
     k_t = (k_delta * g.to(q.dtype))    # K~ = G * K   (delta path only)

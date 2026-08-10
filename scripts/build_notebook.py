@@ -354,11 +354,24 @@ def build() -> nbf.NotebookNode:
         nbf.v4.new_markdown_cell(src) if kind == MD else nbf.v4.new_code_cell(src)
         for kind, src in CELLS
     ]
+    # Deterministic ids. nbformat assigns random ones, so without this a rebuild shows
+    # up as a large diff even when nothing changed -- unhelpful for a generated file
+    # that is meant to be regenerated often.
+    for i, cell in enumerate(nb.cells):
+        cell["id"] = f"cell-{i:02d}"
     nb.metadata = {
         "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
         "language_info": {"name": "python"},
     }
     return nb
+
+
+def strip_volatile(nb: nbf.NotebookNode) -> None:
+    """Remove wall-clock timestamps so the same content produces the same bytes."""
+    for cell in nb.cells:
+        cell.get("metadata", {}).pop("execution", None)
+        for out in cell.get("outputs", []):
+            out.get("metadata", {}).pop("execution", None)
 
 
 def main():
@@ -374,6 +387,7 @@ def main():
         client = NotebookClient(nb, timeout=600, kernel_name="python3",
                                resources={"metadata": {"path": str(Path.cwd())}})
         client.execute()
+        strip_volatile(nb)
         print("all cells executed without error")
 
     out = Path(a.out)

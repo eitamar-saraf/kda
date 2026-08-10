@@ -166,3 +166,34 @@ def test_gradients_flow_and_match():
 
     torch.testing.assert_close(a2.grad, a.grad, rtol=1e-6, atol=1e-8)
     torch.testing.assert_close(b2.grad, b.grad, rtol=1e-6, atol=1e-8)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_runs_end_to_end_in_low_precision(dtype):
+    """The whole kernel, in the dtypes it is actually called with.
+
+    Every other test here runs in float64, which hid a real bug: the gate maths is kept
+    in fp32 on purpose, and one of those fp32 values multiplies the carried state. That
+    silently promoted S on the first chunk, and the *second* chunk then failed with
+    "expected scalar type BFloat16 but found Float" -- so it only reproduced at
+    sequences longer than one chunk, which no float64 test would ever surface.
+    """
+    t = 96                                  # > chunk_size, so the state really is carried
+    d = make(t, dtype=torch.float32, decay=(0.9, 0.999))
+    cast = lambda x: x.to(dtype)
+    ref = linear_attn(d["q"].double(), d["k"].double(), d["v"].double(),
+                      d["alpha_channel"].double(), d["beta"].double(),
+                      gate="channel", delta=True)
+
+    got = chunk_linear_attn(
+        cast(d["q"]), cast(d["k"]), cast(d["v"]),
+        cast(d["alpha_channel"]), cast(d["beta"]),
+        gate="channel", delta=True, chunk_size=32,
+    )
+    assert got.dtype == dtype, f"output dtype changed to {got.dtype}"
+    assert torch.isfinite(got).all(), "non-finite output"
+
+    # relative Frobenius error -- the right metric across precisions
+    rel = ((got.double() - ref).norm() / ref.norm()).item()
+    budget = {torch.float32: 1e-5, torch.bfloat16: 5e-2, torch.float16: 5e-2}[dtype]
+    assert rel < budget, f"{dtype} relative error {rel:.3e} exceeds {budget:.0e}"
