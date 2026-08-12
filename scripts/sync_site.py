@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 #: Files the article loads directly, and where they land in the website repo.
-ASSETS = ["kda-math.js", "widgets.js"]
+ASSETS = ["kda-math.js", "widgets.js", "notes.js"]
 DEFAULT_SITE = Path.home() / "code" / "eitamar-saraf.github.io"
 SITE_SUBDIR = Path("public") / "kimi-linear"
 
