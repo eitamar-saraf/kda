@@ -237,102 +237,152 @@ export function mountAssociativity(root) {
   draw();
 }
 
-// ============================================ 3. interference and the delta rule
-export function mountInterference(root) {
-  const box = panel(root, "Why a fixed-size memory goes wrong, and what fixes it",
-    "Write key–value pairs into one matrix, then read one back. The retrieval splits into the value you wanted plus everything else leaking through.");
+// ================================ 3a. overwriting: what the delta rule really fixes
+export function mountOverwrite(root) {
+  const box = panel(root, "Writing to the same key more than once",
+    "One key, written repeatedly with a new value each time. Then read it back. This is the failure the delta rule removes — completely.");
 
   const controls = el("div", "grid sm:grid-cols-2 gap-4 mb-4", box);
-  const chart = svg("svg", { viewBox: "0 0 640 240", class: "w-full", role: "img" }, box);
+  const chart = svg("svg", { viewBox: "0 0 640 250", class: "w-full", role: "img" }, box);
   const caption = el("p", "text-sm text-gray-600 mt-2", box);
 
-  const dk = 8, dv = 6;
-  let nPairs = 5, useDelta = false;
-
-  const readN = slider(controls, {
-    label: "Key–value pairs written", min: 2, max: 16, step: 1, value: nPairs,
-    format: (v) => `${v} of ${dk} dims`,
+  const dk = 8, dv = 5;
+  let writes = 3;
+  const readW = slider(controls, {
+    label: "Times the key is written", min: 2, max: 8, step: 1, value: writes,
+    format: (v) => String(v),
   }, () => draw());
 
-  const toggleWrap = el("label", "flex items-center gap-2 text-sm self-end", controls);
-  const toggle = el("input", "accent-blue-600 w-4 h-4", toggleWrap);
-  toggle.type = "checkbox";
-  el("span", "text-gray-700", toggleWrap, "Use the delta rule");
-  toggle.addEventListener("change", () => { useDelta = toggle.checked; draw(); });
-
   function draw() {
-    nPairs = readN();
+    writes = readW();
     chart.innerHTML = "";
-    const rng = mulberry32(3);
-    const keys = Array.from({ length: nPairs }, () => randomUnit(rng, dk));
-    const values = Array.from({ length: nPairs }, (_, i) =>
+    const rng = mulberry32(4);
+    const k = randomUnit(rng, dk);
+    // a fresh value each write; only the last one should survive
+    const vals = Array.from({ length: writes }, (_, i) =>
       Array.from({ length: dv }, (_, j) => (j === i % dv ? 1 : 0)));
 
-    const probe = 0;
-    const beta = new Array(nPairs).fill(1);
-    const res = linearAttn([...keys, keys[probe]], [...keys, keys[probe]],
-      [...values, new Array(dv).fill(0)],
-      { beta: [...beta, 0], gate: "none", delta: useDelta });
-    const got = res.outputs[nPairs];
-    const want = values[probe];
+    const keys = Array.from({ length: writes + 1 }, () => k);   // +1 read-only step
+    const seq = [...vals, new Array(dv).fill(0)];
+    const beta = [...new Array(writes).fill(1), 0];             // last step writes nothing
 
-    const decomp = interference(keys, values, probe);
-    const noiseNorm = Math.hypot(...decomp.noise);
-    const sigNorm = Math.hypot(...decomp.signal);
+    const run = (delta) =>
+      linearAttn(keys, keys, seq, { beta, gate: "none", delta }).outputs[writes];
+    const plain = run(false);
+    const delta = run(true);
+    const want = vals[writes - 1];
 
-    // bars: wanted vs retrieved
-    const bw = 34, x0 = 20;
-    svg("text", { x: x0, y: 18, "font-size": 12, fill: C.ink2 }, chart)
-      .textContent = "what we stored for key #1";
-    want.forEach((val, j) => {
-      svg("rect", { x: x0 + j * (bw + 6), y: 30 + (1 - val) * 60, width: bw,
-        height: Math.max(1, val * 60), rx: 4, fill: C.ref }, chart);
+    const errP = Math.hypot(...plain.map((x, j) => x - want[j]));
+    const errD = Math.hypot(...delta.map((x, j) => x - want[j]));
+
+    const rows = [
+      ["last value written", want, C.ref],
+      ["plain linear attention", plain, C.s2],
+      ["with the delta rule", delta, C.s1],
+    ];
+    const bw = 30, gap = 5, x0 = 210;
+    const scale = Math.max(1, ...plain.map(Math.abs));
+    rows.forEach(([label, vec, col], r) => {
+      const y = 34 + r * 68;
+      svg("text", { x: 0, y: y + 26, "font-size": 12, fill: C.ink2 }, chart).textContent = label;
+      vec.forEach((val, j) => {
+        const h = Math.max(1.5, (Math.abs(val) / scale) * 44);
+        svg("rect", { x: x0 + j * (bw + gap), y: y + 46 - h, width: bw, height: h,
+          rx: 3, fill: col }, chart);
+        svg("text", { x: x0 + j * (bw + gap) + bw / 2, y: y + 58, "text-anchor": "middle",
+          "font-size": 9, fill: C.muted, "font-family": "ui-monospace,monospace" }, chart)
+          .textContent = val.toFixed(1);
+      });
+      svg("line", { x1: x0 - 6, y1: y + 46, x2: x0 + dv * (bw + gap), y2: y + 46,
+        stroke: C.grid, "stroke-width": 1.5 }, chart);
+      if (r > 0) {
+        const e = r === 1 ? errP : errD;
+        svg("text", { x: 590, y: y + 30, "text-anchor": "end", "font-size": 13,
+          fill: r === 1 ? C.s2 : C.s1, "font-family": "ui-monospace,monospace",
+          "font-weight": 600 }, chart).textContent = "err " + e.toFixed(2);
+      }
     });
 
-    svg("text", { x: x0, y: 128, "font-size": 12, fill: C.ink2 }, chart)
-      .textContent = "what we get back";
-    const scale = Math.max(1, ...got.map(Math.abs));
-    got.forEach((val, j) => {
-      const h = Math.max(1, (Math.abs(val) / scale) * 60);
-      svg("rect", { x: x0 + j * (bw + 6), y: val >= 0 ? 200 - h : 200, width: bw,
-        height: h, rx: 4, fill: useDelta ? C.s1 : C.s2 }, chart);
-    });
-    svg("line", { x1: x0 - 6, y1: 200, x2: x0 + dv * (bw + 6), y2: 200,
-      stroke: C.grid, "stroke-width": 2 }, chart);
-
-    // numbers
-    const err = Math.hypot(...got.map((g, j) => g - want[j]));
-    const tx = 330;
-    const lines = useDelta
-      ? [["retrieval error", err.toFixed(3)],
-         ["", ""],
-         ["The delta rule subtracts what the", ""],
-         ["memory already answers before it", ""],
-         ["writes, so each key is corrected", ""],
-         ["rather than piled on.", ""]]
-      : [["signal ‖w‖", sigNorm.toFixed(3)],
-         ["interference ‖noise‖", noiseNorm.toFixed(3)],
-         ["retrieval error", err.toFixed(3)],
-         ["", ""],
-         [`${nPairs} keys in ${dk} dimensions:`, ""],
-         [nPairs > dk
-            ? "more keys than dimensions, so no"
-            : "random keys are never exactly", ""],
-         [nPairs > dk
-            ? "arrangement can be orthogonal."
-            : "orthogonal, so some leaks through.", ""]];
-    lines.forEach(([a, b], i) => {
-      const y = 30 + i * 20;
-      svg("text", { x: tx, y, "font-size": 12, fill: C.ink2 }, chart).textContent = a;
-      if (b) svg("text", { x: 620, y, "font-size": 13, "text-anchor": "end",
-        fill: C.ink, "font-family": "ui-monospace,monospace" }, chart).textContent = b;
-    });
-
-    caption.textContent = useDelta
-      ? `With the delta rule the memory reproduces the stored value almost exactly (error ${err.toFixed(3)}), even with ${nPairs} pairs in an ${dk}-dimensional state. This is the whole reason DeltaNet exists.`
-      : `Every other key that is not perfectly orthogonal to key #1 leaks into the answer. With ${nPairs} pairs the leak has norm ${noiseNorm.toFixed(2)} against a signal of ${sigNorm.toFixed(2)}. Tick the box to turn on the delta rule.`;
+    caption.textContent =
+      `Written ${writes} times, plain linear attention hands back the sum of every value it was ever ` +
+      `given (error ${errP.toFixed(2)}, and it grows with each write) because addition is the only ` +
+      `thing it can do. The delta rule subtracts what the memory already answers before writing, so ` +
+      `the last value replaces the earlier ones exactly — error ${errD.toFixed(2)}, no matter how many times you write.`;
   }
   draw();
+}
+
+// =========================== 3b. crowding: what the delta rule does NOT fix
+export function mountCrowding(root) {
+  const box = panel(root, "More keys than the state has room for",
+    "Now every key is different. This is a second, unrelated failure — and one the delta rule cannot remove, only soften. Worth being precise about, because it is the price of a fixed-size memory.");
+
+  const chart = svg("svg", { viewBox: "0 0 640 215", class: "w-full", role: "img" }, box);
+  const caption = el("p", "text-sm text-gray-600 mt-3", box);
+
+  const dk = 8, dv = 6, maxN = 32, trials = 40;
+
+  function curve(delta) {
+    const out = [];
+    for (let n = 1; n <= maxN; n++) {
+      let tot = 0;
+      for (let t = 0; t < trials; t++) {
+        const rng = mulberry32(9000 + 97 * n + t);
+        const keys = Array.from({ length: n }, () => randomUnit(rng, dk));
+        const vals = Array.from({ length: n }, () => randomUnit(rng, dv));
+        const res = linearAttn([...keys, keys[0]], [...keys, keys[0]],
+          [...vals, new Array(dv).fill(0)],
+          { beta: [...new Array(n).fill(1), 0], gate: "none", delta });
+        const got = res.outputs[n];
+        tot += Math.hypot(...got.map((x, j) => x - vals[0][j]));
+      }
+      out.push(tot / trials);
+    }
+    return out;
+  }
+
+  const plain = curve(false), delta = curve(true);
+  const yMax = Math.max(...plain, ...delta) * 1.08;
+  const x0 = 46, y0 = 22, w = 520, h = 150;
+  const X = (n) => x0 + ((n - 1) / (maxN - 1)) * w;
+  const Y = (v) => y0 + h - (v / yMax) * h;
+
+  svg("line", { x1: x0, y1: y0 + h, x2: x0 + w, y2: y0 + h, stroke: C.grid, "stroke-width": 2 }, chart);
+  svg("line", { x1: x0, y1: y0, x2: x0, y2: y0 + h, stroke: C.grid, "stroke-width": 2 }, chart);
+  svg("text", { x: 2, y: y0 - 6, "font-size": 10, fill: C.ink2 }, chart)
+    .textContent = "retrieval error";
+  svg("text", { x: x0 + w / 2 - 60, y: y0 + h + 30, "font-size": 11, fill: C.ink2 }, chart)
+    .textContent = "distinct keys written into the state →";
+
+  // the capacity line: dk orthogonal directions exist, no more
+  svg("line", { x1: X(dk), y1: y0, x2: X(dk), y2: y0 + h, stroke: C.muted,
+    "stroke-width": 1.2, "stroke-dasharray": "4 3" }, chart);
+  svg("text", { x: X(dk) + 5, y: y0 + 11, "font-size": 9.5, fill: C.muted }, chart)
+    .textContent = `${dk} keys = the state's ${dk} dimensions`;
+
+  [[plain, C.s2, "plain"], [delta, C.s1, "delta rule"]].forEach(([series, col, label]) => {
+    const pts = series.map((v, i) => [X(i + 1), Y(v)]);
+    svg("polyline", { points: pts.map((p) => p.join(",")).join(" "), fill: "none",
+      stroke: col, "stroke-width": 2, "stroke-linejoin": "round" }, chart);
+    svg("text", { x: pts[pts.length - 1][0] + 6, y: pts[pts.length - 1][1] + 4,
+      "font-size": 11, fill: col, "font-weight": 600 }, chart).textContent = label;
+  });
+
+  [0, yMax / 2, yMax].forEach((v) => {
+    svg("text", { x: x0 - 6, y: Y(v) + 4, "text-anchor": "end", "font-size": 9,
+      fill: C.muted, "font-family": "ui-monospace,monospace" }, chart)
+      .textContent = v.toFixed(1);
+  });
+
+  const at4 = plain[3], at4d = delta[3];
+  const atMax = plain[maxN - 1], atMaxD = delta[maxN - 1];
+  caption.textContent =
+    `Below the state's ${dk} dimensions the delta rule is no help at all — at 4 keys it is ` +
+    `${at4d.toFixed(2)} against plain's ${at4.toFixed(2)}, slightly worse. One pass of it corrects ` +
+    `each key in turn, and correcting a later key disturbs an earlier one whenever their keys are not ` +
+    `perpendicular. What it buys is a ceiling: by ${maxN} keys plain has reached ${atMax.toFixed(2)} ` +
+    `and is still climbing, while the delta rule has flattened at ${atMaxD.toFixed(2)}. Crowding is not ` +
+    `a bug in the update rule; it is what a fixed-size state costs. Only more dimensions buy more room.`;
 }
 
 // ================================================= 4. beta as a learning rate
@@ -748,7 +798,8 @@ export function mountHybridStack(root) {
 const REGISTRY = {
   "cache-growth": mountCacheGrowth,
   associativity: mountAssociativity,
-  interference: mountInterference,
+  overwrite: mountOverwrite,
+  crowding: mountCrowding,
   beta: mountBeta,
   "gate-granularity": mountGateGranularity,
   "decay-as-position": mountDecayAsPosition,
