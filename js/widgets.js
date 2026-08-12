@@ -65,10 +65,26 @@ function slider(parent, { label, min, max, step, value, format = (v) => v }, onC
   return () => Number(input.value);
 }
 
+/** A labelled <select>. Returns a read function. */
+function choice(parent, { label, options, value }, onChange) {
+  const wrap = el("label", "block text-sm", parent);
+  el("span", "block text-gray-600 mb-1", wrap, label);
+  const sel = el("select", "w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white", wrap);
+  for (const o of options) {
+    const opt = el("option", null, sel, o.label);
+    opt.value = String(o.value);
+    if (o.value === value) opt.selected = true;
+  }
+  sel.addEventListener("change", () => onChange(Number(sel.value)));
+  return () => Number(sel.value);
+}
+
+// Powers of two, so the units are the binary ones -- GiB not GB. The prose quotes
+// "exactly 1.000 GiB" for a 2048-token cache and it has to be the same unit here.
 function fmtBytes(b) {
-  if (b >= 2 ** 30) return (b / 2 ** 30).toFixed(2) + " GB";
-  if (b >= 2 ** 20) return (b / 2 ** 20).toFixed(1) + " MB";
-  if (b >= 2 ** 10) return (b / 2 ** 10).toFixed(1) + " KB";
+  if (b >= 2 ** 30) return (b / 2 ** 30).toFixed(2) + " GiB";
+  if (b >= 2 ** 20) return (b / 2 ** 20).toFixed(1) + " MiB";
+  if (b >= 2 ** 10) return (b / 2 ** 10).toFixed(1) + " KiB";
   return b + " B";
 }
 
@@ -123,49 +139,78 @@ function panel(root, title, blurb) {
 
 // =============================================================== 1. the KV cache
 export function mountCacheGrowth(root) {
-  const box = panel(root, "What has to be kept to write the next token",
-    "Attention stores a key and a value for every token it has seen. A recurrent state stores one fixed-size matrix per head, whatever the context length.");
+  const box = panel(root, "The two formulas, with a slider on them",
+    "KV bytes = 2 \u00b7 L \u00b7 H_kv \u00b7 d_h \u00b7 T \u00b7 p  grows with context. state bytes = L \u00b7 H \u00b7 d_k \u00b7 d_v \u00b7 p does not. Change any factor and watch which one dominates.");
 
-  const cfg = { layers: 32, heads: 32, headDim: 128 };
-  const controls = el("div", "grid sm:grid-cols-2 gap-4 mb-4", box);
-  const chart = svg("svg", { viewBox: "0 0 640 190", class: "w-full", role: "img" }, box);
+  const controls = el("div", "grid sm:grid-cols-3 gap-4 mb-4", box);
+  const work = el("div", "not-prose rounded border bg-gray-50 px-4 py-3 mb-4 font-mono text-xs md:text-sm text-gray-800 overflow-x-auto", box);
+  const chart = svg("svg", { viewBox: "0 0 640 150", class: "w-full", role: "img" }, box);
   const caption = el("p", "text-sm text-gray-600 mt-2", box);
 
-  let logLen = 12;
+  const L = 32, H = 32, dh = 128;           // a 7B-class shape
+  let logLen = 11;                          // 2048 tokens: the 1 GiB anchor
+
   const readLen = slider(controls, {
-    label: "Context length", min: 10, max: 20, step: 1, value: logLen,
-    format: (v) => fmtNum(2 ** v) + " tokens",
-  }, (v) => { logLen = v; draw(); });
+    label: "Context length T", min: 6, max: 21, step: 1, value: logLen,
+    format: (v) => fmtNum(2 ** v) + " tok",
+  }, () => draw());
+  const readP = choice(controls, {
+    label: "Precision p", value: 2,
+    options: [
+      { label: "fp32 \u2014 4 bytes", value: 4 },
+      { label: "bf16 / fp16 \u2014 2 bytes", value: 2 },
+      { label: "fp8 \u2014 1 byte", value: 1 },
+      { label: "int4 \u2014 0.5 bytes", value: 0.5 },
+    ],
+  }, () => draw());
+  const readKv = choice(controls, {
+    label: "Key/value heads H_kv", value: 32,
+    options: [
+      { label: "32 \u2014 MHA (one each)", value: 32 },
+      { label: "8 \u2014 GQA, 4 queries share", value: 8 },
+      { label: "4 \u2014 GQA, 8 queries share", value: 4 },
+      { label: "1 \u2014 MQA (all share)", value: 1 },
+    ],
+  }, () => draw());
 
   function draw() {
-    const seqLen = 2 ** readLen();
+    const T = 2 ** readLen(), p = readP(), Hkv = readKv();
     chart.innerHTML = "";
-    const full = cacheBytes({ seqLen, layers: cfg.layers, ...cfg, kdaPerAttn: 0 });
-    const hybrid = cacheBytes({ seqLen, layers: cfg.layers, ...cfg, kdaPerAttn: 3 });
+
+    const kvFull = 2 * L * Hkv * dh * T * p;                 // every layer attends
+    const state = L * H * dh * dh * p;                        // every layer recurrent
+    const nAttn = L / 4;                                      // 3:1 hybrid
+    const hybrid = 2 * nAttn * Hkv * dh * T * p + (L - nAttn) * H * dh * dh * p;
+
+    work.innerHTML = "";
+    const line = (t) => el("div", "whitespace-nowrap", work, t);
+    line(`KV cache   = 2 \u00d7 ${L} \u00d7 ${Hkv} \u00d7 ${dh} \u00d7 ${T.toLocaleString()} \u00d7 ${p}  =  ${kvFull.toLocaleString()} B  =  ${fmtBytes(kvFull)}`);
+    line(`state      =     ${L} \u00d7 ${H} \u00d7 ${dh} \u00d7 ${dh} \u00d7 ${p}  =  ${state.toLocaleString()} B  =  ${fmtBytes(state)}   \u2190 no T`);
 
     const rows = [
-      { label: "Full attention", bytes: full.attention, color: C.s2 },
-      { label: "3:1 hybrid (KDA + attention)", bytes: hybrid.attention + hybrid.kda, color: C.s1 },
-      { label: "Pure KDA state", bytes: cacheBytes({ seqLen, layers: cfg.layers, ...cfg }).kda, color: C.s3 },
+      { label: `Full attention \u2014 ${L} layers cached`, bytes: kvFull, color: C.s2 },
+      { label: "3:1 hybrid \u2014 8 layers cached, 24 recurrent", bytes: hybrid, color: C.s1 },
+      { label: "Pure KDA \u2014 nothing cached", bytes: state, color: C.s3 },
     ];
     const max = Math.max(...rows.map((r) => r.bytes));
     rows.forEach((r, i) => {
-      const y = 30 + i * 52;
-      svg("text", { x: 0, y: y - 6, "font-size": 12, fill: C.ink2 }, chart).textContent = r.label;
-      svg("rect", { x: 0, y, width: 470, height: 20, rx: 4, fill: "#f3f4f6" }, chart);
-      const w = Math.max(2, (r.bytes / max) * 470);
-      svg("rect", { x: 0, y, width: w, height: 20, rx: 4, fill: r.color }, chart);
-      svg("text", {
-        x: 480, y: y + 15, "font-size": 13, fill: C.ink, "font-family": "ui-monospace,monospace",
-      }, chart).textContent = fmtBytes(r.bytes);
+      const y = 24 + i * 42;
+      svg("text", { x: 0, y: y - 5, "font-size": 11, fill: C.ink2 }, chart).textContent = r.label;
+      svg("rect", { x: 0, y, width: 450, height: 17, rx: 4, fill: "#f3f4f6" }, chart);
+      svg("rect", { x: 0, y, width: Math.max(2, (r.bytes / max) * 450), height: 17, rx: 4, fill: r.color }, chart);
+      svg("text", { x: 460, y: y + 13, "font-size": 12, fill: C.ink,
+        "font-family": "ui-monospace,monospace" }, chart).textContent = fmtBytes(r.bytes);
     });
 
-    const saving = 1 - (hybrid.attention + hybrid.kda) / full.attention;
+    // where the two formulas cross: 2 . nLayers . Hkv . dh . T . p == state
+    const cross = state / (2 * L * Hkv * dh * p);
+    const ratio = kvFull / state;
     caption.textContent =
-      `At ${fmtNum(seqLen)} tokens, a ${cfg.layers}-layer model with ${cfg.heads} heads of ` +
-      `dimension ${cfg.headDim} keeps ${fmtBytes(full.attention)} of KV cache with full attention. ` +
-      `Replacing three layers in four with KDA cuts that by ${(saving * 100).toFixed(0)}% — ` +
-      `and the KDA part does not grow at all as the context gets longer.`;
+      `At ${fmtNum(T)} tokens the cache is ${fmtBytes(kvFull)} against a fixed ${fmtBytes(state)} of state ` +
+      `\u2014 ${ratio >= 1 ? ratio.toFixed(1) + "\u00d7 larger" : (1 / ratio).toFixed(1) + "\u00d7 smaller"}. ` +
+      `The two are equal at T \u2248 ${Math.round(cross)} tokens; below that the recurrent state is the more ` +
+      `expensive thing to keep. Dropping p or sharing key/value heads scales the cache down by a constant, ` +
+      `but it stays proportional to T \u2014 which is the factor the rest of this post removes.`;
   }
   draw();
 }
