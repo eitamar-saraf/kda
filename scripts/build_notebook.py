@@ -32,7 +32,7 @@ $$S_t = (I - \beta_t k_t k_t^\top)\,\mathrm{Diag}(\alpha_t)\,S_{t-1} + \beta_t k
 Nothing here needs a GPU. Everything runs in float64 in a few seconds, because the point
 is to see *what* is computed, not how fast.
 
-Companion article: [Kimi Delta Attention, Illustrated](https://eitamar-saraf.github.io/blog/kimi-linear/)."""),
+Companion article: [Kimi Delta Attention](https://eitamar-saraf.github.io/blog/kimi-linear/)."""),
 
 (CODE, """import torch
 import torch.nn.functional as F

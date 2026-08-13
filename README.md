@@ -2,7 +2,7 @@
 
 A readable, tested implementation of **Kimi Delta Attention** and the five architectures
 it descends from, plus the experiments behind the writeup
-*[Kimi Delta Attention, Illustrated](https://eitamar-saraf.github.io/blog/kimi-linear/)*.
+*[Kimi Delta Attention](https://eitamar-saraf.github.io/blog/kimi-linear/)*.
 
 Reference: Kimi Team, *[Kimi Linear: An Expressive, Efficient Attention Architecture](https://arxiv.org/abs/2510.26692)*
 (arXiv:2510.26692).
