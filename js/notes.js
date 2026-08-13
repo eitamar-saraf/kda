@@ -47,6 +47,9 @@ const CSS = `
   box-shadow: 0 8px 24px rgba(0,0,0,.10), 0 2px 6px rgba(0,0,0,.06);
   padding: 12px 14px; font-size: 0.875rem; line-height: 1.55;
   text-align: left; font-weight: 400; white-space: normal;
+  /* A symbol legend plus a precision table can run to ~1000px. Cap it and scroll,
+     or a long note runs off the bottom of a laptop screen with no way back. */
+  max-height: min(70vh, 32rem); overflow-y: auto; overscroll-behavior: contain;
 }
 .kn-b code, .kn-b .m { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
 /* A note lives inside an article <p>, so its body may contain only phrasing content:
@@ -65,13 +68,31 @@ const CSS = `
   column-gap: 16px; row-gap: 3px; margin: 8px 0 2px; font-size: 0.8rem;
 }
 .kn-tbl > .kn-hd { font-weight: 600; border-bottom: 1px solid #e5e7eb; padding-bottom: 2px; }
+/* Symbol legend: a narrow mono column, a flexible description, a mono value. */
+.kn-legend {
+  display: grid; grid-template-columns: auto 1fr auto;
+  column-gap: 12px; row-gap: 4px; margin: 8px 0; font-size: 0.8rem;
+  align-items: baseline;
+}
+.kn-legend > .kn-sym {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600; color: #1f2937; white-space: nowrap;
+}
+.kn-legend > .kn-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1d4ed8; white-space: nowrap; text-align: right;
+}
+.kn-legend > .kn-hd { font-weight: 600; border-bottom: 1px solid #e5e7eb; padding-bottom: 3px; font-size: 0.75rem; color: #6b7280; }
 .kn-close {
   display: block; margin-top: 10px; font-size: 0.75rem; color: #6b7280;
   background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline;
 }
 @media (max-width: 640px) {
   /* On a narrow screen, anchoring to the word overflows. Pin to the text column. */
-  [data-kn="on"] .kn.kn-open .kn-b { position: fixed; left: 1rem; right: 1rem; top: auto; width: auto; max-width: none; }
+  [data-kn="on"] .kn.kn-open .kn-b {
+    position: fixed; left: 1rem; right: 1rem; bottom: 1rem; top: auto;
+    width: auto; max-width: none; max-height: 60vh;
+  }
 }
 `;
 
@@ -105,10 +126,37 @@ function clampIntoView(note) {
   const body = note.querySelector(".kn-b");
   if (!body) return;
   body.style.left = "0px";
+  body.style.top = "";
+  body.style.bottom = "";
+  body.style.maxHeight = "";
   if (window.innerWidth <= 640) return;          // pinned by CSS at that width
-  const r = body.getBoundingClientRect();
-  const overflow = r.right - (window.innerWidth - 16);
-  if (overflow > 0) body.style.left = `${-overflow}px`;
+
+  // horizontal: nudge left if it would run off the right edge
+  let r = body.getBoundingClientRect();
+  const overflowX = r.right - (window.innerWidth - 16);
+  if (overflowX > 0) body.style.left = `${-overflowX}px`;
+
+  // Vertical: a legend plus a table can be taller than either side of the term, so
+  // pick the roomier side *and* cap the height to what is actually there. Capping is
+  // the part that matters -- flipping alone still left it hanging off the bottom of a
+  // 900px laptop screen, because neither side had 512px to give.
+  const term = note.querySelector(".kn-t").getBoundingClientRect();
+  const GAP = 14;
+  const roomBelow = window.innerHeight - term.bottom - GAP;
+  const roomAbove = term.top - GAP;
+  const cap = Math.min(window.innerHeight * 0.7, 32 * 16);
+  const wanted = Math.min(cap, body.scrollHeight);
+
+  const flip = wanted > roomBelow && roomAbove > roomBelow;
+  const room = flip ? roomAbove : roomBelow;
+  body.style.maxHeight = `${Math.max(150, Math.min(cap, room))}px`;
+  if (flip) {
+    body.style.top = "auto";
+    body.style.bottom = "calc(100% + 8px)";
+  } else {
+    body.style.top = "calc(100% + 8px)";
+    body.style.bottom = "auto";
+  }
 }
 
 function wire(note, i) {
